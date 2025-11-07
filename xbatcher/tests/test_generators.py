@@ -265,6 +265,20 @@ def test_batch_3d_1d_input_batch_concat_duplicate_dim(sample_ds_3d):
         validate_batch_dimensions(expected_dims=expected_dims, batch=ds_batch)
 
 
+def test_batch_3d_uneven_batch_input_dim(sample_ds_3d):
+    """
+    Test for error when a batch dimension is not a multiple of the
+    corresponding input dimension.
+    """
+    with pytest.raises(ValueError, match='imply partial batches'):
+        _ = BatchGenerator(
+            sample_ds_3d,
+            input_dims={'x': 5, 'y': 10},
+            batch_dims={'x': 11, 'y': 21},
+            concat_input_dims=True,
+        )
+
+
 @pytest.mark.parametrize('input_size', [5, 10])
 def test_batch_3d_2d_input(sample_ds_3d, input_size):
     """
