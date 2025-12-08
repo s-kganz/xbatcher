@@ -90,15 +90,6 @@ class BatchSchema:
             **self._unique_batch_dims, **self.input_dims
         )
 
-        # Check that duplicate dims imply whole patches per batch
-        for dim, length in self.batch_dims.items():
-            input_dim_length = self.input_dims.get(dim)
-            if input_dim_length is not None and length % input_dim_length != 0:
-                raise ValueError(
-                    f'Input and batch dimension sizes imply partial batches '
-                    f'on dimension {dim}. Input size: {input_dim_length}; Batch size: {length}'
-                )
-
         self.selectors: BatchSelectorSet = self._gen_batch_selectors(ds)
 
     def _gen_batch_selectors(self, ds: xr.DataArray | xr.Dataset) -> BatchSelectorSet:
@@ -225,7 +216,10 @@ class BatchSchema:
         Calculate the number of batches per dimension
         """
         self._n_batches_per_dim: dict[Hashable, int] = {
-            dim: int(ds.sizes[dim] // self.batch_dims.get(dim, ds.sizes[dim]))
+            dim: int(
+                self._n_patches_per_dim[dim]
+                // self._n_patches_per_batch.get(dim, ds.sizes[dim])
+            )
             for dim in self._all_sliced_dims.keys()
         }
 
