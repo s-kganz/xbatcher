@@ -49,6 +49,30 @@ def sample_ds_3d():
     return ds
 
 
+@pytest.fixture(scope='module')
+def sample_filter_fn():
+    """
+    Sample filter function for testing.
+    """
+
+    def myfilter(ds, patch):
+        return ds.isel(patch).bar.mean() > 4.5
+
+    return myfilter
+
+
+@pytest.fixture(scope='module')
+def sample_resample_fn():
+    """
+    Sample resample function for testing.
+    """
+
+    def myresample(ds, patch):
+        return ds.isel(patch).foo.mean()
+
+    return myresample
+
+
 def test_constructor_dataarray():
     """
     Test that the xarray.DataArray passed to the batch generator is stored
@@ -444,3 +468,123 @@ def test_batcher_cached_getitem(sample_ds_1d, preload) -> None:
     ds_cache = bg[1]
     xr.testing.assert_equal(ds_no_cache, ds_cache)
     xr.testing.assert_identical(ds_no_cache, ds_cache)
+
+
+def test_filter_1d(sample_ds_1d, sample_filter_fn):
+    bg = BatchGenerator(sample_ds_1d, input_dims={'x': 5})
+
+    bg_filter = BatchGenerator(
+        sample_ds_1d, input_dims={'x': 5}, filter_fn=sample_filter_fn
+    )
+
+    assert len(bg_filter) < len(bg)
+
+    for batch in bg_filter:
+        assert batch.bar.mean() > 4.5
+
+
+def test_filter_3d(sample_ds_3d, sample_filter_fn):
+    bg = BatchGenerator(sample_ds_3d, input_dims={'x': 5, 'y': 5, 'time': 5})
+
+    bg_filter = BatchGenerator(
+        sample_ds_3d, input_dims={'x': 5, 'y': 5, 'time': 5}, filter_fn=sample_filter_fn
+    )
+
+    assert len(bg_filter) < len(bg)
+
+    for batch in bg_filter:
+        assert batch.bar.mean() > 4.5
+
+
+def test_filter_3d_concat(sample_ds_3d, sample_filter_fn):
+    bg = BatchGenerator(
+        sample_ds_3d, input_dims={'x': 5, 'y': 5, 'time': 5}, concat_input_dims=True
+    )
+
+    bg_filter = BatchGenerator(
+        sample_ds_3d,
+        input_dims={'x': 5, 'y': 5, 'time': 5},
+        filter_fn=sample_filter_fn,
+        concat_input_dims=True,
+    )
+
+    assert bg_filter[0].sizes['input_batch'] < bg[0].sizes['input_batch']
+
+    assert (bg_filter[0].bar.mean(dim=['x_input', 'y_input', 'time_input']) > 4.5).all()
+
+
+@pytest.mark.parametrize('n', [5, 10])
+def test_resample_1d(sample_ds_1d, sample_resample_fn, n):
+    bg = BatchGenerator(
+        sample_ds_1d, input_dims={'x': 5}, resample_fn=sample_resample_fn, resample_n=n
+    )
+    assert len(bg) == n
+
+
+@pytest.mark.parametrize('n', [10, 50, 100])
+def test_resample_3d(sample_ds_3d, sample_resample_fn, n):
+    bg = BatchGenerator(
+        sample_ds_3d,
+        input_dims={'x': 5, 'y': 5, 'time': 5},
+        resample_fn=sample_resample_fn,
+        resample_n=n,
+    )
+    assert len(bg) == n
+
+
+def test_filter_prevents_resample(sample_ds_3d, sample_resample_fn):
+    def strict_filter(*args):
+        return False
+
+    with pytest.raises(AssertionError, match='Cannot sample 1000 slices'):
+        BatchGenerator(
+            sample_ds_3d,
+            input_dims={'x': 5, 'y': 5, 'time': 5},
+            resample_fn=sample_resample_fn,
+            resample_n=1000,
+        )
+
+
+def test_error_missing_resample_n(sample_ds_3d):
+    with pytest.raises(AssertionError, match='resample_n must be provided'):
+        BatchGenerator(
+            sample_ds_3d,
+            input_dims={'x': 5, 'y': 5, 'time': 5},
+            resample_fn=sample_resample_fn,
+            resample_n=None,
+        )
+
+
+def test_error_large_resample_n(sample_ds_3d, sample_resample_fn):
+    with pytest.raises(AssertionError, match='Cannot sample 999999999 slices'):
+        BatchGenerator(
+            sample_ds_3d,
+            input_dims={'x': 5, 'y': 5, 'time': 5},
+            resample_fn=sample_resample_fn,
+            resample_n=999999999,
+        )
+
+
+def test_error_all_zero_resample_weight(sample_ds_3d):
+    def zero(*args):
+        return 0
+
+    with pytest.raises(AssertionError, match='Sample weight vector'):
+        BatchGenerator(
+            sample_ds_3d,
+            input_dims={'x': 5, 'y': 5, 'time': 5},
+            resample_fn=zero,
+            resample_n=100,
+        )
+
+
+def test_warning_empty_filter(sample_ds_3d):
+    def strict_filter(*args):
+        return False
+
+    with pytest.warns(UserWarning, match='no batches'):
+        BatchGenerator(
+            sample_ds_3d,
+            input_dims={'x': 5, 'y': 5, 'time': 5},
+            filter_fn=strict_filter,
+        )
